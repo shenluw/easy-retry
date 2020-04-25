@@ -7,9 +7,11 @@ import org.springframework.kafka.support.SendResult;
 import org.springframework.util.concurrent.FailureCallback;
 import org.springframework.util.concurrent.ListenableFutureCallback;
 import org.springframework.util.concurrent.SuccessCallback;
+import top.shenluw.kafka.storage.MemoryStorage;
 
 import java.io.Serializable;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -44,6 +46,10 @@ public class KafkaRetry<K extends Serializable, V extends Serializable> {
     private FailureCallback                   failureCallback;
 
     private volatile boolean start;
+
+    public KafkaRetry(KafkaTemplate<K, V> kafkaTemplate) {
+        this(new MemoryStorage(new ConcurrentHashMap<>()), kafkaTemplate, Executors.newSingleThreadScheduledExecutor());
+    }
 
     public KafkaRetry(Storage storage, KafkaTemplate<K, V> kafkaTemplate) {
         this(storage, kafkaTemplate, Executors.newSingleThreadScheduledExecutor());
@@ -168,6 +174,14 @@ public class KafkaRetry<K extends Serializable, V extends Serializable> {
 
     public void setFailureCallback(FailureCallback failureCallback) {
         this.failureCallback = failureCallback;
+    }
+
+    public long getThresholdTimestamp() {
+        return thresholdTimestamp;
+    }
+
+    public void setThresholdTimestamp(long thresholdTimestamp) {
+        this.thresholdTimestamp = thresholdTimestamp;
     }
 
     public Storage getStorage() {
