@@ -15,7 +15,7 @@ repositories {
 dependencies {
 	implementation 'org.springframework.kafka:spring-kafka'
 
-	implementation 'org.rocksdb:rocksdbjni:6.7.3'
+	compileOnly 'org.rocksdb:rocksdbjni:6.7.3'
 
 	testImplementation 'org.springframework.boot:spring-boot-starter'
 	testImplementation('org.springframework.boot:spring-boot-starter-test') {

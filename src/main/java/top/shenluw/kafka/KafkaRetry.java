@@ -56,6 +56,10 @@ public class KafkaRetry<K extends Serializable, V extends Serializable> {
         this.scheduledExecutorService = scheduledExecutorService;
     }
 
+    public void push(String topic, V data) {
+        storage.save(topic, null, data);
+    }
+
     public void push(String topic, K key, V data) {
         storage.save(topic, key, data);
     }
