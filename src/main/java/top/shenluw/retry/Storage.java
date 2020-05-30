@@ -19,6 +19,8 @@ public interface Storage extends AutoCloseable {
     @Override
     void close() throws Exception;
 
+    boolean isOpen();
+
     default void save(String group, Serializable key, Serializable data) {
         KV kv = new KV(key, data);
 

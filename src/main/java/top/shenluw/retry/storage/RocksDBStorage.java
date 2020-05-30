@@ -12,6 +12,7 @@ import java.io.Serializable;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * @author Shenluw
@@ -50,6 +51,8 @@ public class RocksDBStorage implements Storage {
 
     private Sequence sequence;
 
+    private final AtomicBoolean opened = new AtomicBoolean(false);
+
     public RocksDBStorage(String path) {
         this(path, new Sequence());
     }
@@ -60,7 +63,7 @@ public class RocksDBStorage implements Storage {
     }
 
     @Override
-    public void open() throws Exception {
+    public synchronized void open() throws Exception {
         try (DBOptions options = new DBOptions().setCreateIfMissing(true).setCreateMissingColumnFamilies(true)
                 .setAtomicFlush(true)) {
             open(this.path, options);
@@ -84,6 +87,7 @@ public class RocksDBStorage implements Storage {
         for (ColumnFamilyHandle handle : handles) {
             this.handleMap.put(new String(handle.getName()), handle);
         }
+        opened.set(true);
     }
 
 
@@ -100,6 +104,11 @@ public class RocksDBStorage implements Storage {
 
     @Override
     public void save(String group, Serializable key, Serializable data) {
+        if (!opened.get()) {
+            log.warn("storage not opened. save group: {}, key: {}, v: {}", group, key, data);
+            return;
+        }
+
         RKV  kv        = new RKV(key, data);
         long timestamp = System.currentTimeMillis();
         kv.timestamp = timestamp;
@@ -109,6 +118,15 @@ public class RocksDBStorage implements Storage {
 
     @Override
     public void save(String group, KV kv) {
+        if (!opened.get()) {
+            long id = 0;
+            if (kv instanceof RKV && ((RKV) kv).id != null) {
+                id = toLong(((RKV) kv).id);
+            }
+            log.warn("storage not opened. save group: {}, id: {}, key: {}, v: {}", group, id, kv.key, kv.value);
+            return;
+        }
+
         RKV rkv;
         if (kv instanceof RKV) {
             rkv = (RKV) kv;
@@ -129,6 +147,11 @@ public class RocksDBStorage implements Storage {
 
     @Override
     public KV pop(String group) {
+        if (!opened.get()) {
+            log.warn("storage not opened. pop group: {}", group);
+            return null;
+        }
+
         RKV persistedKV = getFirst(group);
         try {
             return persistedKV;
@@ -146,13 +169,21 @@ public class RocksDBStorage implements Storage {
 
     @Override
     public KV peek(String group) {
-        return getFirst(group);
+        if (opened.get()) {
+            return getFirst(group);
+        }
+        log.warn("storage not opened. peek group: {}", group);
+        return null;
     }
 
     @Override
     public void delete(String group, KV kv) {
         if (kv instanceof RKV) {
             RKV rkv = (RKV) kv;
+            if (!opened.get()) {
+                log.warn("storage not opened. delete group: {}, id: {}, key: {}, v: {}", group, toLong(rkv.id), kv.key, kv.value);
+                return;
+            }
             try {
                 db.delete(handleMap.get(group), generateKey(rkv));
             } catch (Exception e) {
@@ -196,6 +227,20 @@ public class RocksDBStorage implements Storage {
         return 0;
     }
 
+    public long count(String group) {
+        ColumnFamilyHandle handle = handleMap.get(group);
+        if (handle == null) return 0;
+        long count = 0;
+        try (RocksIterator iterator = db.newIterator(handle)) {
+            iterator.seekToFirst();
+            while (iterator.isValid()) {
+                count++;
+                iterator.next();
+            }
+        }
+        return count;
+    }
+
     protected RKV fromBytes(byte[] bs) {
         return (RKV) SerializationUtils.deserialize(bs);
     }
@@ -214,9 +259,15 @@ public class RocksDBStorage implements Storage {
     @Override
     public synchronized void close() {
         if (db != null) {
+            opened.set(false);
             db.close();
             db = null;
         }
+    }
+
+    @Override
+    public boolean isOpen() {
+        return opened.get();
     }
 
     private static byte[] toBytes(long v) {

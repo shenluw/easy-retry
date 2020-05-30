@@ -31,6 +31,11 @@ public class MemoryStorage implements Storage {
     }
 
     @Override
+    public boolean isOpen() {
+        return true;
+    }
+
+    @Override
     public void save(String group, KV kv) {
         Queue<KV> queue = cache.getOrDefault(group, new ArrayDeque<>());
         queue.add(kv);

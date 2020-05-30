@@ -5,6 +5,7 @@ import org.slf4j.LoggerFactory;
 import top.shenluw.retry.storage.MemoryStorage;
 
 import java.io.Serializable;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
@@ -50,6 +51,11 @@ public class Retry<K extends Serializable, V extends Serializable, R> {
     private BiConsumer<R, Throwable> callback;
 
     private volatile boolean start;
+
+    /**
+     * 缓存每个组的第一个数据时间戳，单位毫秒
+     */
+    private final Map<String, Long> cacheFirstTs = new ConcurrentHashMap<>();
 
     public Retry(RetryHandler<K, V, R> retryHandler) {
         this(new MemoryStorage(new ConcurrentHashMap<>()), retryHandler, Executors.newSingleThreadScheduledExecutor());
@@ -102,17 +108,25 @@ public class Retry<K extends Serializable, V extends Serializable, R> {
     }
 
     private void retry(String group) {
-        long current = System.currentTimeMillis();
+        long current;
         for (int i = 0; i < maxRetryCount; i++) {
             Storage.KV kv;
             if (thresholdTimestamp > 0) {
+                current = System.currentTimeMillis();
+                Long cacheTs = cacheFirstTs.get(group);
+                if (cacheTs != null && cacheTs + thresholdTimestamp > current) {
+                    return;
+                }
+
                 kv = storage.peek(group);
+                //  顺序存入， 当有一个时间不满足后面的全不满足
                 if (kv == null) {
                     return;
                 }
                 // 避免短时间反复重试
                 if (kv.putTimestamp + thresholdTimestamp > current) {
-                    continue;
+                    cacheFirstTs.put(group, kv.putTimestamp);
+                    return;
                 }
                 storage.delete(group, kv);
             } else {
@@ -128,7 +142,7 @@ public class Retry<K extends Serializable, V extends Serializable, R> {
                         Serializable data = kv.value;
                         if (throwable != null) {
                             log.debug("retry failure. group: {}, key: {}, v: {}, times: {}", group, key, data, kv.retryTimes, throwable);
-                            if (++kv.retryTimes >= maxRetryTimes) {
+                            if (maxRetryTimes > 0 && ++kv.retryTimes >= maxRetryTimes) {
                                 log.info("retry times more than max {}. group: {}, key: {}, v: {}, ts: {}",
                                         maxRetryTimes, group, key, data, kv.timestamp);
                                 throwable = new Throwable("retry times more than max", throwable);
