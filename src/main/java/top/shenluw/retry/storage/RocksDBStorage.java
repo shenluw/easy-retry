@@ -1,10 +1,10 @@
-package top.shenluw.kafka.storage;
+package top.shenluw.retry.storage;
 
 import org.rocksdb.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.util.SerializationUtils;
-import top.shenluw.kafka.Storage;
+import top.shenluw.retry.Storage;
 
 import java.io.Serializable;
 import java.nio.charset.Charset;
@@ -23,7 +23,7 @@ public class RocksDBStorage implements Storage {
         RocksDB.loadLibrary();
     }
 
-    private static class RKV extends KV implements Serializable {
+    private static class RKV extends Storage.KV implements Serializable {
         private static final long serialVersionUID = 5530674135687606467L;
 
         long hash;
@@ -62,10 +62,10 @@ public class RocksDBStorage implements Storage {
         List<ColumnFamilyDescriptor> descriptors = new ArrayList<>();
         descriptors.add(new ColumnFamilyDescriptor(RocksDB.DEFAULT_COLUMN_FAMILY));
 
-        for (byte[] topicBs : RocksDB.listColumnFamilies(new Options(), path)) {
-            String topic = new String(topicBs);
-            if (!new String(RocksDB.DEFAULT_COLUMN_FAMILY).equals(topic)) {
-                descriptors.add(new ColumnFamilyDescriptor(topicBs));
+        for (byte[] groupBs : RocksDB.listColumnFamilies(new Options(), path)) {
+            String group = new String(groupBs);
+            if (!new String(RocksDB.DEFAULT_COLUMN_FAMILY).equals(group)) {
+                descriptors.add(new ColumnFamilyDescriptor(groupBs));
             }
         }
 
@@ -78,26 +78,26 @@ public class RocksDBStorage implements Storage {
     }
 
 
-    private synchronized ColumnFamilyHandle getOrCreateColumnFamilyHandle(String topic) throws RocksDBException {
-        ColumnFamilyHandle handle = handleMap.get(topic);
+    private synchronized ColumnFamilyHandle getOrCreateColumnFamilyHandle(String group) throws RocksDBException {
+        ColumnFamilyHandle handle = handleMap.get(group);
         if (handle != null) {
             return handle;
         }
-        handle = db.createColumnFamily(new ColumnFamilyDescriptor(topic.getBytes(UTF_8)));
+        handle = db.createColumnFamily(new ColumnFamilyDescriptor(group.getBytes(UTF_8)));
 
-        handleMap.put(topic, handle);
+        handleMap.put(group, handle);
         return handle;
     }
 
     @Override
-    public void save(String topic, Serializable key, Serializable data) {
+    public void save(String group, Serializable key, Serializable data) {
         RKV kv = new RKV(key, data);
         kv.timestamp = System.currentTimeMillis();
-        save(topic, kv);
+        save(group, kv);
     }
 
     @Override
-    public void save(String topic, KV kv) {
+    public void save(String group, KV kv) {
         RKV rkv;
         if (kv instanceof RKV) {
             rkv = (RKV) kv;
@@ -105,10 +105,10 @@ public class RocksDBStorage implements Storage {
             rkv = new RKV(kv);
         }
 
-        ColumnFamilyHandle handle = handleMap.get(topic);
+        ColumnFamilyHandle handle = handleMap.get(group);
         try {
             if (handle == null) {
-                handle = getOrCreateColumnFamilyHandle(topic);
+                handle = getOrCreateColumnFamilyHandle(group);
             }
             byte[] bytes = toValue(rkv);
             db.put(handle, generateKey(rkv, bytes), bytes);
@@ -118,8 +118,8 @@ public class RocksDBStorage implements Storage {
     }
 
     @Override
-    public KV pop(String topic) {
-        PersistedKV persistedKV = getFirst(topic);
+    public KV pop(String group) {
+        PersistedKV persistedKV = getFirst(group);
         if (persistedKV == null) {
             return null;
         }
@@ -134,21 +134,21 @@ public class RocksDBStorage implements Storage {
             try {
                 kv = fromBytes(bytes);
             } catch (Exception e) {
-                log.warn("convert error. topic: {}, bytes: {}", topic, bytes, e);
+                log.warn("convert error. group: {}, bytes: {}", group, bytes, e);
             }
             return kv;
         } finally {
             try {
-                db.delete(handleMap.get(topic), persistedKV.key);
+                db.delete(handleMap.get(group), persistedKV.key);
             } catch (Exception e) {
-                log.warn("delete key error. topic: {}, key: {}, bytes: {}", topic, new String(persistedKV.key), persistedKV.value, e);
+                log.warn("delete key error. group: {}, key: {}, bytes: {}", group, new String(persistedKV.key), persistedKV.value, e);
             }
         }
     }
 
     @Override
-    public KV peek(String topic) {
-        PersistedKV persistedKV = getFirst(topic);
+    public KV peek(String group) {
+        PersistedKV persistedKV = getFirst(group);
         if (persistedKV != null) {
             return fromBytes(persistedKV.value);
         }
@@ -156,7 +156,7 @@ public class RocksDBStorage implements Storage {
     }
 
     @Override
-    public void delete(String topic, KV kv) {
+    public void delete(String group, KV kv) {
         if (kv instanceof RKV) {
             RKV rkv = (RKV) kv;
             try {
@@ -164,9 +164,9 @@ public class RocksDBStorage implements Storage {
                 if (rkv.hash <= 0) {
                     bytes = toValue(rkv);
                 }
-                db.delete(handleMap.get(topic), generateKey(rkv, bytes));
+                db.delete(handleMap.get(group), generateKey(rkv, bytes));
             } catch (Exception e) {
-                log.warn("delete key error. topic: {}, key: {}, v: {}", topic, kv.key, kv.value, e);
+                log.warn("delete key error. group: {}, key: {}, v: {}", group, kv.key, kv.value, e);
             }
         } else {
             log.warn("type {} can not delete. key: {}, v: {}", kv.getClass().getSimpleName(), kv.key, kv.value);
@@ -182,8 +182,8 @@ public class RocksDBStorage implements Storage {
         }
     }
 
-    private PersistedKV getFirst(String topic) {
-        ColumnFamilyHandle handle = handleMap.get(topic);
+    private PersistedKV getFirst(String group) {
+        ColumnFamilyHandle handle = handleMap.get(group);
         if (handle == null) {
             return null;
         }
@@ -198,7 +198,7 @@ public class RocksDBStorage implements Storage {
     }
 
     @Override
-    public Set<String> topics() {
+    public Set<String> groups() {
         return handleMap.keySet();
     }
 

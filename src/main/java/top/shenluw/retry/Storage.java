@@ -1,4 +1,4 @@
-package top.shenluw.kafka;
+package top.shenluw.retry;
 
 import java.io.Serializable;
 import java.util.Set;
@@ -19,33 +19,33 @@ public interface Storage extends AutoCloseable {
     @Override
     void close() throws Exception;
 
-    default void save(String topic, Serializable key, Serializable data) {
+    default void save(String group, Serializable key, Serializable data) {
         KV kv = new KV(key, data);
         kv.timestamp = System.currentTimeMillis();
-        save(topic, kv);
+        save(group, kv);
     }
 
-    void save(String topic, KV kv);
+    void save(String group, KV kv);
 
     /**
-     * 根据topic获取记录并删除
+     * 根据group获取记录并删除
      *
-     * @param topic
+     * @param group
      * @return
      */
-    KV pop(String topic);
+    KV pop(String group);
 
     /**
-     * 根据topic获取记录
+     * 根据group获取记录
      *
-     * @param topic
+     * @param group
      * @return
      */
-    KV peek(String topic);
+    KV peek(String group);
 
-    void delete(String topic, KV kv);
+    void delete(String group, KV kv);
 
-    Set<String> topics();
+    Set<String> groups();
 
     /**
      * 全部重试记录数量

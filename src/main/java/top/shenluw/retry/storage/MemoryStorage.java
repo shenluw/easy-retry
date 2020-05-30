@@ -1,7 +1,7 @@
-package top.shenluw.kafka.storage;
+package top.shenluw.retry.storage;
 
 import org.springframework.util.CollectionUtils;
-import top.shenluw.kafka.Storage;
+import top.shenluw.retry.Storage;
 
 import java.util.ArrayDeque;
 import java.util.Map;
@@ -14,7 +14,7 @@ import java.util.Set;
  */
 public class MemoryStorage implements Storage {
 
-    private Map<String, Queue<KV>> cache;
+    private Map<String, Queue<Storage.KV>> cache;
 
     public MemoryStorage(Map<String, Queue<KV>> cache) {
         this.cache = cache;
@@ -31,15 +31,15 @@ public class MemoryStorage implements Storage {
     }
 
     @Override
-    public void save(String topic, KV kv) {
-        Queue<KV> queue = cache.getOrDefault(topic, new ArrayDeque<>());
+    public void save(String group, KV kv) {
+        Queue<KV> queue = cache.getOrDefault(group, new ArrayDeque<>());
         queue.add(kv);
-        cache.put(topic, queue);
+        cache.put(group, queue);
     }
 
     @Override
-    public KV pop(String topic) {
-        Queue<KV> queue = cache.get(topic);
+    public KV pop(String group) {
+        Queue<KV> queue = cache.get(group);
         if (!CollectionUtils.isEmpty(queue)) {
             return queue.poll();
         }
@@ -47,8 +47,8 @@ public class MemoryStorage implements Storage {
     }
 
     @Override
-    public KV peek(String topic) {
-        Queue<KV> queue = cache.get(topic);
+    public KV peek(String group) {
+        Queue<KV> queue = cache.get(group);
         if (!CollectionUtils.isEmpty(queue)) {
             return queue.peek();
         }
@@ -56,15 +56,15 @@ public class MemoryStorage implements Storage {
     }
 
     @Override
-    public void delete(String topic, KV kv) {
-        Queue<KV> queue = cache.get(topic);
+    public void delete(String group, KV kv) {
+        Queue<KV> queue = cache.get(group);
         if (!CollectionUtils.isEmpty(queue)) {
             queue.removeIf(next -> next == kv);
         }
     }
 
     @Override
-    public Set<String> topics() {
+    public Set<String> groups() {
         return cache.keySet();
     }
 
