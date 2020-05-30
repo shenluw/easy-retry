@@ -31,6 +31,11 @@ public class Retry<K extends Serializable, V extends Serializable, R> {
      */
     private int  maxRetryCount      = 100;
     /**
+     * 一条记录的最大重试次数
+     * -1 无限 0 不重试
+     */
+    private int  maxRetryTimes      = -1;
+    /**
      * 定时重试间隔, 单位毫秒
      */
     private int  retryInterval      = 60_000;
@@ -78,6 +83,10 @@ public class Retry<K extends Serializable, V extends Serializable, R> {
                 log.info("retry total count: {}", storage.count());
             }
 
+            if (maxRetryTimes == 0) {
+                return;
+            }
+
             Set<String> groups = storage.groups();
             for (String group : groups) {
                 retry(group);
@@ -102,7 +111,7 @@ public class Retry<K extends Serializable, V extends Serializable, R> {
                     return;
                 }
                 // 避免短时间反复重试
-                if (kv.timestamp + thresholdTimestamp > current) {
+                if (kv.putTimestamp + thresholdTimestamp > current) {
                     continue;
                 }
                 storage.delete(group, kv);
@@ -118,9 +127,15 @@ public class Retry<K extends Serializable, V extends Serializable, R> {
                         Serializable key  = kv.key;
                         Serializable data = kv.value;
                         if (throwable != null) {
-                            log.debug("retry failure. group: {}, key: {}, v: {}", group, key, data, throwable);
-                            kv.timestamp = System.currentTimeMillis();
-                            storage.save(group, kv);
+                            log.debug("retry failure. group: {}, key: {}, v: {}, times: {}", group, key, data, kv.retryTimes, throwable);
+                            if (++kv.retryTimes >= maxRetryTimes) {
+                                log.info("retry times more than max {}. group: {}, key: {}, v: {}, ts: {}",
+                                        maxRetryTimes, group, key, data, kv.timestamp);
+                                throwable = new Throwable("retry times more than max", throwable);
+                            } else {
+                                kv.putTimestamp = System.currentTimeMillis();
+                                storage.save(group, kv);
+                            }
                         } else {
                             log.debug("retry success. group: {}, key: {}, v: {}", group, key, data);
                         }
@@ -178,5 +193,13 @@ public class Retry<K extends Serializable, V extends Serializable, R> {
 
     public void setCallback(BiConsumer<R, Throwable> callback) {
         this.callback = callback;
+    }
+
+    public int getMaxRetryTimes() {
+        return maxRetryTimes;
+    }
+
+    public void setMaxRetryTimes(int maxRetryTimes) {
+        this.maxRetryTimes = maxRetryTimes;
     }
 }

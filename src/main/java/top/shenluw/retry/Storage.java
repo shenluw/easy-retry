@@ -21,7 +21,10 @@ public interface Storage extends AutoCloseable {
 
     default void save(String group, Serializable key, Serializable data) {
         KV kv = new KV(key, data);
-        kv.timestamp = System.currentTimeMillis();
+
+        long timestamp = System.currentTimeMillis();
+        kv.timestamp = timestamp;
+        kv.putTimestamp = timestamp;
         save(group, kv);
     }
 
@@ -58,8 +61,17 @@ public interface Storage extends AutoCloseable {
         public Serializable key, value;
         /**
          * 存入时间
+         * 第一次存入或者每次重试后存入时间
+         */
+        public long putTimestamp;
+        /**
+         * 发生时间
          */
         public long timestamp;
+        /**
+         * 已经重试次数
+         */
+        public int  retryTimes;
 
         public KV(Serializable key, Serializable value) {
             this.key = key;

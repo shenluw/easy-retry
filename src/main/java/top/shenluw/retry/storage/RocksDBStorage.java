@@ -1,10 +1,12 @@
 package top.shenluw.retry.storage;
 
+import org.apache.commons.codec.binary.Hex;
+import org.apache.commons.lang3.SerializationUtils;
 import org.rocksdb.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.util.SerializationUtils;
 import top.shenluw.retry.Storage;
+import top.shenluw.retry.sequence.Sequence;
 
 import java.io.Serializable;
 import java.nio.charset.Charset;
@@ -23,10 +25,10 @@ public class RocksDBStorage implements Storage {
         RocksDB.loadLibrary();
     }
 
-    private static class RKV extends Storage.KV implements Serializable {
+    protected static class RKV extends Storage.KV implements Serializable {
         private static final long serialVersionUID = 5530674135687606467L;
 
-        long hash;
+        private byte[] id;
 
         public RKV(KV kv) {
             this(kv.key, kv.value);
@@ -46,8 +48,15 @@ public class RocksDBStorage implements Storage {
 
     private String path;
 
+    private Sequence sequence;
+
     public RocksDBStorage(String path) {
+        this(path, new Sequence());
+    }
+
+    public RocksDBStorage(String path, Sequence sequence) {
         this.path = path;
+        this.sequence = sequence;
     }
 
     @Override
@@ -91,8 +100,10 @@ public class RocksDBStorage implements Storage {
 
     @Override
     public void save(String group, Serializable key, Serializable data) {
-        RKV kv = new RKV(key, data);
-        kv.timestamp = System.currentTimeMillis();
+        RKV  kv        = new RKV(key, data);
+        long timestamp = System.currentTimeMillis();
+        kv.timestamp = timestamp;
+        kv.putTimestamp = timestamp;
         save(group, kv);
     }
 
@@ -110,8 +121,7 @@ public class RocksDBStorage implements Storage {
             if (handle == null) {
                 handle = getOrCreateColumnFamilyHandle(group);
             }
-            byte[] bytes = toValue(rkv);
-            db.put(handle, generateKey(rkv, bytes), bytes);
+            db.put(handle, generateKey(rkv), toValue(rkv));
         } catch (Exception e) {
             log.warn("save key error. key: {}, v: {}", kv.key, kv.value, e);
         }
@@ -119,40 +129,24 @@ public class RocksDBStorage implements Storage {
 
     @Override
     public KV pop(String group) {
-        PersistedKV persistedKV = getFirst(group);
-        if (persistedKV == null) {
-            return null;
-        }
-
+        RKV persistedKV = getFirst(group);
         try {
-            byte[] bytes = persistedKV.value;
-            if (bytes == null) {
-                return null;
-            }
-
-            RKV kv = null;
-            try {
-                kv = fromBytes(bytes);
-            } catch (Exception e) {
-                log.warn("convert error. group: {}, bytes: {}", group, bytes, e);
-            }
-            return kv;
+            return persistedKV;
         } finally {
             try {
-                db.delete(handleMap.get(group), persistedKV.key);
+                if (persistedKV != null) {
+                    db.delete(handleMap.get(group), persistedKV.id);
+                }
             } catch (Exception e) {
-                log.warn("delete key error. group: {}, key: {}, bytes: {}", group, new String(persistedKV.key), persistedKV.value, e);
+                log.warn("delete key error. group: {}, id: {}, key: {}, bytes: {}",
+                        group, toLong(persistedKV.id), persistedKV.key, persistedKV.value, e);
             }
         }
     }
 
     @Override
     public KV peek(String group) {
-        PersistedKV persistedKV = getFirst(group);
-        if (persistedKV != null) {
-            return fromBytes(persistedKV.value);
-        }
-        return null;
+        return getFirst(group);
     }
 
     @Override
@@ -160,11 +154,7 @@ public class RocksDBStorage implements Storage {
         if (kv instanceof RKV) {
             RKV rkv = (RKV) kv;
             try {
-                byte[] bytes = null;
-                if (rkv.hash <= 0) {
-                    bytes = toValue(rkv);
-                }
-                db.delete(handleMap.get(group), generateKey(rkv, bytes));
+                db.delete(handleMap.get(group), generateKey(rkv));
             } catch (Exception e) {
                 log.warn("delete key error. group: {}, key: {}, v: {}", group, kv.key, kv.value, e);
             }
@@ -173,16 +163,7 @@ public class RocksDBStorage implements Storage {
         }
     }
 
-    private class PersistedKV {
-        byte[] key, value;
-
-        public PersistedKV(byte[] key, byte[] value) {
-            this.key = key;
-            this.value = value;
-        }
-    }
-
-    private PersistedKV getFirst(String group) {
+    private RKV getFirst(String group) {
         ColumnFamilyHandle handle = handleMap.get(group);
         if (handle == null) {
             return null;
@@ -191,7 +172,14 @@ public class RocksDBStorage implements Storage {
         try (RocksIterator iterator = db.newIterator(handle)) {
             iterator.seekToFirst();
             if (iterator.isValid()) {
-                return new PersistedKV(iterator.key(), iterator.value());
+                byte[] bytes = iterator.value();
+                if (bytes != null) {
+                    try {
+                        return fromBytes(bytes);
+                    } catch (Exception e) {
+                        log.warn("convert error. group: {}, bytes: {}", group, Hex.encodeHexString(bytes), e);
+                    }
+                }
             }
         }
         return null;
@@ -216,16 +204,11 @@ public class RocksDBStorage implements Storage {
         return SerializationUtils.serialize(kv);
     }
 
-    protected byte[] generateKey(RKV kv, byte[] bytes) {
-        // 分钟前缀
-        long t = kv.timestamp / 1000 / 60;
-
-        long hash = kv.hash;
-        if (hash <= 0) {
-            hash = Arrays.hashCode(bytes);
+    protected byte[] generateKey(RKV kv) {
+        if (kv.id == null) {
+            kv.id = toBytes(sequence.nextId());
         }
-
-        return (t + "" + hash).getBytes(UTF_8);
+        return kv.id;
     }
 
     @Override
@@ -235,4 +218,29 @@ public class RocksDBStorage implements Storage {
             db = null;
         }
     }
+
+    private static byte[] toBytes(long v) {
+        byte[] bs = new byte[8];
+        bs[0] = (byte) (v >>> 56);
+        bs[1] = (byte) (v >>> 48);
+        bs[2] = (byte) (v >>> 40);
+        bs[3] = (byte) (v >>> 32);
+        bs[4] = (byte) (v >>> 24);
+        bs[5] = (byte) (v >>> 16);
+        bs[6] = (byte) (v >>> 8);
+        bs[7] = (byte) (v);
+        return bs;
+    }
+
+    private static long toLong(byte[] bs) {
+        return (((long) bs[0] << 56) +
+                ((long) (bs[1] & 255) << 48) +
+                ((long) (bs[2] & 255) << 40) +
+                ((long) (bs[3] & 255) << 32) +
+                ((long) (bs[4] & 255) << 24) +
+                ((bs[5] & 255) << 16) +
+                ((bs[6] & 255) << 8) +
+                ((bs[7] & 255)));
+    }
+
 }
