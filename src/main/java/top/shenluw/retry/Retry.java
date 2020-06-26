@@ -84,6 +84,7 @@ public class Retry<K extends Serializable, V extends Serializable, R> {
         if (start) {
             return;
         }
+        start = true;
         scheduledExecutorService.scheduleAtFixedRate(() -> {
             if (log.isInfoEnabled()) {
                 log.info("retry total count: {}", storage.count());
