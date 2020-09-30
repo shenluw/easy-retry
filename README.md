@@ -14,7 +14,7 @@ RetryHandler<String, String, String> handler  = (group, key, s) -> {
     return future;
 };
 
-Retry<String, String, String> retry = new Retry<>(new MemoryStorage(new ConcurrentHashMap<>()), handler);
+Retry<String, String, String> retry = new Retry<>(new MemoryStorage(new ConcurrentHashMap<>(), ArrayDeque::new)), handler);
 retry.start();
 ...
 // 加入重试队列

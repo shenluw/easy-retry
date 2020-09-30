@@ -3,7 +3,6 @@ package top.shenluw.retry.storage;
 import org.springframework.util.CollectionUtils;
 import top.shenluw.retry.Storage;
 
-import java.util.ArrayDeque;
 import java.util.Map;
 import java.util.Queue;
 import java.util.Set;
@@ -14,10 +13,21 @@ import java.util.Set;
  */
 public class MemoryStorage implements Storage {
 
-    private Map<String, Queue<Storage.KV>> cache;
+    public interface CreateCacheStrategy {
+        /**
+         * 分配队列
+         *
+         * @return 数据缓存队列
+         */
+        Queue<KV> createQueue();
+    }
 
-    public MemoryStorage(Map<String, Queue<KV>> cache) {
+    private final Map<String, Queue<Storage.KV>> cache;
+    private final CreateCacheStrategy            strategy;
+
+    public MemoryStorage(Map<String, Queue<KV>> cache, CreateCacheStrategy strategy) {
         this.cache = cache;
+        this.strategy = strategy;
     }
 
     @Override
@@ -37,9 +47,18 @@ public class MemoryStorage implements Storage {
 
     @Override
     public void save(String group, KV kv) {
-        Queue<KV> queue = cache.getOrDefault(group, new ArrayDeque<>());
+
+        Queue<KV> queue = cache.get(group);
+        if (queue == null) {
+            synchronized (cache) {
+                queue = cache.get(group);
+                if (queue == null) {
+                    queue = strategy.createQueue();
+                    cache.put(group, queue);
+                }
+            }
+        }
         queue.add(kv);
-        cache.put(group, queue);
     }
 
     @Override

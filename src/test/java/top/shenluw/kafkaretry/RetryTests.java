@@ -7,6 +7,7 @@ import top.shenluw.retry.RetryHandler;
 import top.shenluw.retry.storage.MemoryStorage;
 import top.shenluw.retry.storage.RocksDBStorage;
 
+import java.util.ArrayDeque;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
@@ -50,7 +51,7 @@ public class RetryTests {
     @Test
     void memory() throws InterruptedException {
 
-        Retry<String, String, String> retry = new Retry<>(new MemoryStorage(new ConcurrentHashMap<>()),
+        Retry<String, String, String> retry = new Retry<>(new MemoryStorage(new ConcurrentHashMap<>(), ArrayDeque::new),
                 handler, Executors.newScheduledThreadPool(10));
 
         retry.setCallback(callback);

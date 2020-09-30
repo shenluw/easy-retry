@@ -5,6 +5,7 @@ import org.slf4j.LoggerFactory;
 import top.shenluw.retry.storage.MemoryStorage;
 
 import java.io.Serializable;
+import java.util.ArrayDeque;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -58,7 +59,7 @@ public class Retry<K extends Serializable, V extends Serializable, R> {
     private final Map<String, Long> cacheFirstTs = new ConcurrentHashMap<>();
 
     public Retry(RetryHandler<K, V, R> retryHandler) {
-        this(new MemoryStorage(new ConcurrentHashMap<>()), retryHandler, Executors.newSingleThreadScheduledExecutor());
+        this(new MemoryStorage(new ConcurrentHashMap<>(), ArrayDeque::new), retryHandler, Executors.newSingleThreadScheduledExecutor());
     }
 
     public Retry(Storage storage, RetryHandler<K, V, R> retryHandler) {

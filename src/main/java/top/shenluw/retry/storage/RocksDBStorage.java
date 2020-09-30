@@ -91,14 +91,18 @@ public class RocksDBStorage implements Storage {
     }
 
 
-    private synchronized ColumnFamilyHandle getOrCreateColumnFamilyHandle(String group) throws RocksDBException {
+    private ColumnFamilyHandle getOrCreateColumnFamilyHandle(String group) throws RocksDBException {
         ColumnFamilyHandle handle = handleMap.get(group);
         if (handle != null) {
             return handle;
         }
-        handle = db.createColumnFamily(new ColumnFamilyDescriptor(group.getBytes(UTF_8)));
-
-        handleMap.put(group, handle);
+        synchronized (handleMap) {
+            handle = handleMap.get(group);
+            if (handle == null) {
+                handle = db.createColumnFamily(new ColumnFamilyDescriptor(group.getBytes(UTF_8)));
+                handleMap.put(group, handle);
+            }
+        }
         return handle;
     }
 
@@ -134,11 +138,8 @@ public class RocksDBStorage implements Storage {
             rkv = new RKV(kv);
         }
 
-        ColumnFamilyHandle handle = handleMap.get(group);
         try {
-            if (handle == null) {
-                handle = getOrCreateColumnFamilyHandle(group);
-            }
+            ColumnFamilyHandle handle = getOrCreateColumnFamilyHandle(group);
             db.put(handle, generateKey(rkv), toValue(rkv));
         } catch (Exception e) {
             log.warn("save key error. key: {}, v: {}", kv.key, kv.value, e);
